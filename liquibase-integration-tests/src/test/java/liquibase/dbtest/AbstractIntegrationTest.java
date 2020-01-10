@@ -668,6 +668,9 @@ public abstract class AbstractIntegrationTest {
                 compareControl.addSuppressedField(Column.class, "type"); //database returns different nvarchar2 info even though they are the same
                 compareControl.addSuppressedField(Column.class, "nullable"); // database returns different nullable on views, e.g. v_person.id
             }
+            if (database instanceof PostgresDatabase) {
+                compareControl.addSuppressedField(Column.class, "type"); //database returns different nvarchar2 info even though they are the same
+            }
 
             DiffOutputControl diffOutputControl = new DiffOutputControl();
             File tempFile = tempDirectory.getRoot().createTempFile("liquibase-test", ".xml");
@@ -882,11 +885,10 @@ public abstract class AbstractIntegrationTest {
     public void testAbsolutePathChangeLog() throws Exception {
         assumeNotNull(this.getDatabase());
 
+        String fileUrlToChangeLog = getClass().getResource("/" + includedChangeLog).toString();
+        assertTrue(fileUrlToChangeLog.startsWith("file:/"));
 
-        Set<String> urls = new JUnitResourceAccessor().list(null, includedChangeLog, true, false, true);
-        String absolutePathOfChangeLog = urls.iterator().next();
-
-        absolutePathOfChangeLog = absolutePathOfChangeLog.replaceFirst("file:\\/", "");
+        String absolutePathOfChangeLog = fileUrlToChangeLog.replaceFirst("file:\\/", "");
         if (System.getProperty("os.name").startsWith("Windows ")) {
             absolutePathOfChangeLog = absolutePathOfChangeLog.replace('/', '\\');
         } else {

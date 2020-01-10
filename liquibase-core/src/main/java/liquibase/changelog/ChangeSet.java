@@ -1,6 +1,7 @@
 package liquibase.changelog;
 
 import liquibase.ContextExpression;
+import liquibase.LabelExpression;
 import liquibase.Labels;
 import liquibase.Scope;
 import liquibase.change.Change;
@@ -13,7 +14,14 @@ import liquibase.changelog.visitor.ChangeExecListener;
 import liquibase.database.Database;
 import liquibase.database.DatabaseList;
 import liquibase.database.ObjectQuotingStrategy;
-import liquibase.exception.*;
+import liquibase.exception.DatabaseException;
+import liquibase.exception.MigrationFailedException;
+import liquibase.exception.PreconditionErrorException;
+import liquibase.exception.PreconditionFailedException;
+import liquibase.exception.RollbackFailedException;
+import liquibase.exception.SetupException;
+import liquibase.exception.UnexpectedLiquibaseException;
+import liquibase.exception.ValidationErrors;
 import liquibase.executor.Executor;
 import liquibase.executor.ExecutorService;
 import liquibase.logging.LogType;
@@ -31,7 +39,20 @@ import liquibase.statement.SqlStatement;
 import liquibase.util.StreamUtil;
 import liquibase.util.StringUtil;
 
-import java.util.*;
+import java.awt.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.List;
 
 /**
  * Encapsulates a changeSet and all its associated changes.
@@ -39,6 +60,12 @@ import java.util.*;
 public class ChangeSet implements Conditional, ChangeLogChild {
 
     protected CheckSum checkSum;
+    /**
+     * storedChecksum is used to make the checksum of a changeset that has already been run
+     * on a database available to liquibase extensions. This value might differ from the checkSum value that
+     * is calculated at run time when ValidatorVisitor is being called
+     */
+    private CheckSum storedCheckSum;
 
     public enum RunStatus {
         NOT_RAN, ALREADY_RAN, RUN_AGAIN, MARK_RAN, INVALID_MD5SUM
@@ -247,7 +274,7 @@ public class ChangeSet implements Conditional, ChangeLogChild {
 
     public CheckSum generateCheckSum() {
         if (checkSum == null) {
-            StringBuffer stringToMD5 = new StringBuffer();
+            StringBuilder stringToMD5 = new StringBuilder();
             for (Change change : getChanges()) {
                 stringToMD5.append(change.generateCheckSum()).append(":");
             }
@@ -276,14 +303,11 @@ public class ChangeSet implements Conditional, ChangeLogChild {
         this.created = node.getChildValue(null, "created", String.class);
         this.runOrder = node.getChildValue(null, "runOrder", String.class);
         this.ignore = node.getChildValue(null, "ignore", false);
-        this.comments = StringUtil.join(node.getChildren(null, "comment"), "\n", new StringUtil.StringUtilFormatter() {
-            @Override
-            public String toString(Object obj) {
-                if (((ParsedNode) obj).getValue() == null) {
-                    return "";
-                } else {
-                    return ((ParsedNode) obj).getValue().toString();
-                }
+        this.comments = StringUtil.join(node.getChildren(null, "comment"), "\n", obj -> {
+            if (((ParsedNode) obj).getValue() == null) {
+                return "";
+            } else {
+                return ((ParsedNode) obj).getValue().toString();
             }
         });
         this.comments = StringUtil.trimToNull(this.comments);
@@ -518,7 +542,7 @@ public class ChangeSet implements Conditional, ChangeLogChild {
                 if (listener != null) {
                     listener.preconditionFailed(e, preconditions.getOnFail());
                 }
-                StringBuffer message = new StringBuffer();
+                StringBuilder message = new StringBuilder();
                 message.append(StreamUtil.getLineSeparator());
                 for (FailedPrecondition invalid : e.getFailedPreconditions()) {
                     message.append("          ").append(invalid.toString());
@@ -547,7 +571,7 @@ public class ChangeSet implements Conditional, ChangeLogChild {
                     listener.preconditionErrored(e, preconditions.getOnError());
                 }
 
-                StringBuffer message = new StringBuffer();
+                StringBuilder message = new StringBuilder();
                 message.append(StreamUtil.getLineSeparator());
                 for (ErrorPrecondition invalid : e.getErrorPreconditions()) {
                     message.append("          ").append(invalid.toString());
@@ -781,6 +805,10 @@ public class ChangeSet implements Conditional, ChangeLogChild {
         this.ignore = ignore;
     }
 
+    public boolean isInheritableIgnore() {
+        DatabaseChangeLog changeLog = getChangeLog();
+        return changeLog.isIncludeIgnore();
+    }
     public Collection<ContextExpression> getInheritableContexts() {
         Collection<ContextExpression> expressions = new ArrayList<>();
         DatabaseChangeLog changeLog = getChangeLog();
@@ -792,6 +820,19 @@ public class ChangeSet implements Conditional, ChangeLogChild {
             ContextExpression includeExpression = changeLog.getIncludeContexts();
             if ((includeExpression != null) && !includeExpression.isEmpty()) {
                 expressions.add(includeExpression);
+            }
+            changeLog = changeLog.getParentChangeLog();
+        }
+        return Collections.unmodifiableCollection(expressions);
+    }
+
+    public Collection<LabelExpression> getInheritableLabels() {
+        Collection<LabelExpression> expressions = new ArrayList<LabelExpression>();
+        DatabaseChangeLog changeLog = getChangeLog();
+        while (changeLog != null) {
+            LabelExpression expression = changeLog.getIncludeLabels();
+            if (expression != null && !expression.isEmpty()) {
+                expressions.add(expression);
             }
             changeLog = changeLog.getParentChangeLog();
         }
@@ -1065,11 +1106,7 @@ public class ChangeSet implements Conditional, ChangeLogChild {
 
         if ("dbms".equals(field)) {
             if ((this.getDbmsSet() != null) && !this.getDbmsSet().isEmpty()) {
-                StringBuffer dbmsString = new StringBuffer();
-                for (String dbms : this.getDbmsSet()) {
-                    dbmsString.append(dbms).append(",");
-                }
-                return dbmsString.toString().replaceFirst(",$", "");
+                return StringUtil.join(getDbmsSet(), ",xxx");
             } else {
                 return null;
             }
@@ -1155,5 +1192,21 @@ public class ChangeSet implements Conditional, ChangeLogChild {
         this.attributes.put(attribute, value);
 
         return this;
+    }
+
+    /**
+     * Gets storedCheckSum
+     * @return storedCheckSum if it was executed otherwise null
+     */
+    public CheckSum getStoredCheckSum() {
+        return storedCheckSum;
+    }
+
+    /**
+     * Sets storedCheckSum in ValidatingVisitor in case when changeset was executed
+     * @param storedCheckSum
+     */
+    public void setStoredCheckSum(CheckSum storedCheckSum) {
+        this.storedCheckSum = storedCheckSum;
     }
 }

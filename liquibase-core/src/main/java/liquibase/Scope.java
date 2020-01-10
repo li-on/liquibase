@@ -4,6 +4,7 @@ import liquibase.database.Database;
 import liquibase.database.DatabaseConnection;
 import liquibase.database.OfflineConnection;
 import liquibase.database.jvm.JdbcConnection;
+import liquibase.diff.output.changelog.DiffToChangeLog;
 import liquibase.exception.UnexpectedLiquibaseException;
 import liquibase.listener.LiquibaseListener;
 import liquibase.logging.LogService;
@@ -334,5 +335,4 @@ public class Scope {
     public interface ScopedRunnerWithReturn<T> {
         T run() throws Exception;
     }
-
 }

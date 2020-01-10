@@ -5,7 +5,7 @@
 
     <groupId>org.liquibase</groupId>
     <artifactId>liquibase-parent</artifactId>
-    <version>3.7.0-SNAPSHOT</version>
+    <version>3.9.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <name>Liquibase Parent Configuration</name>
@@ -84,7 +84,7 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 
         <!-- Liquibase core dependencies and required jars versions -->
-        <org.springframework.version>4.3.8.RELEASE</org.springframework.version>
+        <org.springframework.version>4.3.24.RELEASE</org.springframework.version>
         <snakeyaml.version>1.23</snakeyaml.version>
 
         <!-- Liquibase SDK sdk/lib-sdk required libraries versions -->
@@ -197,7 +197,7 @@
             <dependency>
                 <groupId>org.apache.ant</groupId>
                 <artifactId>ant</artifactId>
-                <version>1.7.1</version>
+                <version>1.10.6</version>
                 <scope>provided</scope>
                 <optional>true</optional>
             </dependency>
@@ -292,7 +292,7 @@
             <dependency>
                 <groupId>org.osgi</groupId>
                 <artifactId>org.osgi.core</artifactId>
-                <version>4.3.1</version>
+                <version>6.0.0</version>
             </dependency>
 
             <dependency>
@@ -500,7 +500,7 @@
                 <plugin>
                     <groupId>org.apache.felix</groupId>
                     <artifactId>maven-bundle-plugin</artifactId>
-                    <version>3.3.0</version>
+                    <version>4.1.0</version>
                 </plugin>
 
                 <plugin>

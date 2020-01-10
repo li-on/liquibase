@@ -20,11 +20,13 @@ import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.project.MavenProject;
 import org.apache.maven.wagon.authentication.AuthenticationInfo;
 
+import javax.xml.bind.annotation.XmlSchema;
 import java.io.*;
 import java.lang.reflect.Field;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.text.MessageFormat;
 import java.util.*;
 
 /**
@@ -302,7 +304,7 @@ public abstract class AbstractLiquibaseMojo extends AbstractMojo {
 
                 configureFieldsAndValues();
 
-    //        LogService.getInstance().setDefaultLoggingLevel(logging);
+                //        LogService.getInstance().setDefaultLoggingLevel(logging);
                 getLog().info(CommandLineUtils.getBanner());
 
                 // Displays the settings for the Mojo depending of verbosity mode.
@@ -332,6 +334,8 @@ public abstract class AbstractLiquibaseMojo extends AbstractMojo {
                             databaseChangeLogTableName,
                             databaseChangeLogLockTableName);
                     liquibase = createLiquibase(database);
+
+                    configureChangeLogProperties();
 
                     getLog().debug("expressionVars = " + String.valueOf(expressionVars));
 
@@ -364,7 +368,7 @@ public abstract class AbstractLiquibaseMojo extends AbstractMojo {
                             }
                         }
                     }
-
+                    setupBindInfoPackage();
                     performLiquibaseTask(liquibase);
                 } catch (LiquibaseException e) {
                     cleanup(database);
@@ -383,6 +387,31 @@ public abstract class AbstractLiquibaseMojo extends AbstractMojo {
 
     protected Liquibase getLiquibase() {
         return liquibase;
+    }
+
+    protected void setupBindInfoPackage() {
+        String nsuri = "http://www.hibernate.org/xsd/orm/hbm";
+        String packageInfoClassName = "org.hibernate.boot.jaxb.hbm.spi.package-info";
+        try {
+            final Class<?> packageInfoClass = Class.forName(packageInfoClassName);
+            final XmlSchema xmlSchema = packageInfoClass.getAnnotation(XmlSchema.class);
+            if (xmlSchema == null) {
+                this.getLog().warn(MessageFormat
+                        .format("Class [{0}] is missing the [{1}] annotation. Processing bindings will probably fail.",
+                                packageInfoClassName, XmlSchema.class.getName()));
+            } else {
+                final String namespace = xmlSchema.namespace();
+                if (nsuri.equals(namespace)) {
+                    this.getLog().warn(MessageFormat
+                            .format("Namespace of the [{0}] annotation does not match [{1}]. Processing bindings will probably fail.",
+                                    XmlSchema.class.getName(), nsuri));
+                }
+            }
+        } catch (ClassNotFoundException cnfex) {
+            this.getLog().warn(MessageFormat
+                    .format("Class [{0}] could not be found. Processing bindings will probably fail.",
+                            packageInfoClassName), cnfex);
+        }
     }
 
     protected abstract void performLiquibaseTask(Liquibase liquibase)
@@ -410,18 +439,45 @@ public abstract class AbstractLiquibaseMojo extends AbstractMojo {
         if (propertyFile != null) {
             getLog().info("Parsing Liquibase Properties File");
             getLog().info("  File: " + propertyFile);
-            InputStream is;
-            try {
-                is = Scope.getCurrentScope().getResourceAccessor().openStream(null, propertyFile);
+            try (InputStream is = handlePropertyFileInputStream(propertyFile)) {
+                parsePropertiesFile(is);
+                getLog().info(MavenUtils.LOG_SEPARATOR);
             } catch (IOException e) {
                 throw new UnexpectedLiquibaseException(e);
             }
-            if (is == null) {
-                throw new MojoFailureException("Failed to resolve the properties file.");
-            }
-            parsePropertiesFile(is);
-            getLog().info(MavenUtils.LOG_SEPARATOR);
         }
+    }
+
+    protected void configureChangeLogProperties() throws MojoFailureException, MojoExecutionException {
+        if (propertyFile != null) {
+            getLog().info("Parsing Liquibase Properties File " + propertyFile + " for changeLog parameters");
+            try (InputStream propertiesInputStream = handlePropertyFileInputStream(propertyFile)) {
+                Properties props = loadProperties(propertiesInputStream);
+                for (Map.Entry entry : props.entrySet()) {
+                    String key = (String) entry.getKey();
+                    if (key.startsWith("parameter.")) {
+                        getLog().debug("Setting changeLog parameter " + key);
+                        liquibase.setChangeLogParameter(key.replaceFirst("^parameter.", ""), entry.getValue());
+                    }
+                }
+            } catch (IOException e) {
+                throw new UnexpectedLiquibaseException(e);
+            }
+        }
+    }
+
+    private static InputStream handlePropertyFileInputStream(String propertyFile) throws MojoFailureException {
+        InputStream is;
+        try {
+            is = Scope.getCurrentScope().getResourceAccessor().openStream(null, propertyFile);
+        } catch (IOException e) {
+            throw new UnexpectedLiquibaseException(e);
+        }
+        if (is == null) {
+            throw new MojoFailureException("Failed to resolve the properties file.");
+        }
+
+        return is;
     }
 
     protected ClassLoader getMavenArtifactClassLoader() throws MojoExecutionException {
@@ -515,6 +571,16 @@ public abstract class AbstractLiquibaseMojo extends AbstractMojo {
         }
     }
 
+    private static Properties loadProperties(InputStream propertiesInputStream) throws MojoExecutionException {
+        Properties props = new Properties();
+        try {
+            props.load(propertiesInputStream);
+            return props;
+        } catch (IOException e) {
+            throw new MojoExecutionException("Could not load the properties Liquibase file", e);
+        }
+    }
+
     /**
      * Parses a properties file and sets the associated fields in the plugin.
      *
@@ -528,12 +594,7 @@ public abstract class AbstractLiquibaseMojo extends AbstractMojo {
         if (propertiesInputStream == null) {
             throw new MojoExecutionException("Properties file InputStream is null.");
         }
-        Properties props = new Properties();
-        try {
-            props.load(propertiesInputStream);
-        } catch (IOException e) {
-            throw new MojoExecutionException("Could not load the properties Liquibase file", e);
-        }
+        Properties props = loadProperties(propertiesInputStream);
 
         for (Iterator it = props.keySet().iterator(); it.hasNext(); ) {
             String key = null;
